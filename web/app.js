@@ -694,9 +694,12 @@
     if (!state.tracks.length) {
       const li = document.createElement('li');
       li.className = 'tracklist__empty';
-      li.innerHTML =
-        '曲庫是空的。<br>把 <code>song.mp3</code> 和 <code>song.lrc</code> 放進 ' +
-        '<code>media/</code> 後重新整理，或直接把檔案拖進這個視窗。';
+      // 沒有後端就沒有 media/ 可以放（例如部署成純靜態網站），別叫人去找那個資料夾
+      li.innerHTML = state.online
+        ? '曲庫是空的。<br>把 <code>song.mp3</code> 和 <code>song.lrc</code> 放進 ' +
+          '<code>media/</code> 後重新整理，或直接把檔案拖進這個視窗。'
+        : '曲庫是空的。<br>把 <code>song.mp3</code> 和 <code>song.lrc</code>' +
+          '（或一包 zip）拖進這個視窗就能播。';
       els.tracklist.appendChild(li);
       return;
     }
