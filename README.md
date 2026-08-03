@@ -162,31 +162,49 @@ media/
 
 ## 放到網路上給別人用（Vercel）
 
-前端本來就能離線跑，所以把 `web/` 當成純靜態網站丟上去就好，不用後端。
-別人打開網址、把自己的 mp3 / lrc / zip 拖進去就能播，打軸器也一樣能用。
+部署不需要後端。`build.mjs` 會把 `web/` 跟 `media/` 併成一份 `dist/`，
+順便把 `server.py` 的 `/api/tracks` 先算好存成靜態 JSON，前端拿到的東西跟本機一模一樣。
 
 1. 到 <https://vercel.com> 用 GitHub 帳號登入
 2. **Add New… → Project**，選這個 repo，按 **Import**
-3. 設定畫面什麼都不用改，直接 **Deploy**（根目錄的 `vercel.json` 已經指定好 `web/`）
+3. 設定畫面什麼都不用改，直接 **Deploy**（`vercel.json` 已經寫好建置指令與輸出目錄）
 4. 一分鐘後拿到 `https://<專案名>.vercel.app`
 
-之後每次 push 到 `main`，Vercel 會自動重新部署。
+之後每次 push 到 `main`，Vercel 會自動重新建置與部署。想在本機看部署後的樣子：
 
-Vercel 那份是**純前端**：
+```bash
+node build.mjs        # 產生 dist/
+```
 
-- 沒有 `/api/tracks`，所以不會有預載曲庫，開起來就是空的等你拖檔案
-- zip 會用瀏覽器內建的 `DecompressionStream` 當場解開，不會存檔，重新整理就沒了
-- 每個人的歌都留在自己的瀏覽器裡，不會上傳到任何地方
+### 要讓線上版一打開就有歌
 
-`server.py` **不會**跟著部署，也不建議這樣做：Vercel 跑的是無狀態的
-serverless function，沒有可以長期存檔的磁碟，`media/` 又本來就被 `.gitignore`
-排除。要有共用曲庫的話，得自己找一台常駐的機器跑 `python3 server.py --host 0.0.0.0`，
-並且注意上面那段安全提醒跟你手上音樂的授權。
+**`media/` 裡的檔案必須進版控**，Vercel 才看得到——它是從 GitHub 拉程式碼去建置的，
+你本機的檔案它讀不到。所以 `.gitignore` 不能再排除 `media/`。
+
+這代表**你放進去的音樂會跟著 repo 一起公開**（repo 是 public 的話任何人都能下載），
+請只放自己有權散布的檔案。不想公開就把 `media/` 留在 `.gitignore` 裡，
+線上版會是空的，讓訪客自己拖檔案進去播。
+
+### 線上版跟本機版的差別
+
+| | `python3 server.py` | Vercel |
+| --- | --- | --- |
+| 曲庫來源 | 每次請求都重掃 `media/` | 建置時掃一次，寫進 `dist/api/tracks.json` |
+| 新增歌曲 | 丟進 `media/`，重新整理就有 | 要 commit + push，等重新部署 |
+| 上傳 zip | 存進 `media/` | 瀏覽器當場解開來播，不會存檔 |
+| 內嵌封面 | 會挖出 mp3 的 ID3 圖片 | 不會，請放同名圖檔（否則顯示漸層） |
+| 拖曳播放、打軸器 | 一樣 | 一樣 |
+
+`server.py` **不會**跟著部署：Vercel 跑的是無狀態的 serverless function，
+沒有可以長期存檔的磁碟，所以線上版的上傳只能是「當場播、不留存」。
+要有大家都能寫入的共用曲庫，得自己找一台常駐機器跑
+`python3 server.py --host 0.0.0.0`，並注意下面那段安全提醒。
 
 ## 專案結構
 
 ```
-vercel.json        # 部署設定：靜態網站，根目錄指到 web/
+vercel.json        # 部署設定：建置指令與輸出目錄
+build.mjs          # 把 web/ + media/ 併成 dist/，並先算好靜態版的 /api/tracks
 server.py          # 掃曲庫 / 送音檔（支援 Range）/ 送 lrc / 挖 ID3 封面 / 收 zip
 web/
 ├── index.html
@@ -194,7 +212,8 @@ web/
 ├── unzip.js       # 瀏覽器端解 zip（離線模式用）
 ├── maker.js       # 打時間軸、輸出 lrc
 └── app.js         # LRC 解析、逐幀同步、主色抽取、上傳
-media/             # 你的歌（已被 .gitignore 排除）
+media/             # 你的歌
+dist/              # build.mjs 的產物（已被 .gitignore 排除）
 ```
 
 後端刻意做得很薄：它只負責「找檔案」「把 bytes 吐出來」跟「把一包 zip 解到 media/」，
