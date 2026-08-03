@@ -1,0 +1,9 @@
+# 你的音樂與歌詞不要進版控
+media/*
+!media/README.md
+
+__pycache__/
+*.py[cod]
+
+.DS_Store
+Thumbs.db
