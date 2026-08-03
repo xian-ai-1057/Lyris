@@ -38,14 +38,23 @@
     tracklist: $('tracklist'),
     trackCount: $('trackCount'),
     btnLibrary: $('btnLibrary'),
+    btnMaker: $('btnMaker'),
     btnCloseDrawer: $('btnCloseDrawer'),
     dropzone: $('dropzone'),
     toast: $('toast'),
+    uploader: $('uploader'),
+    uploadDrop: $('uploadDrop'),
+    uploadInput: $('uploadInput'),
+    uploadBar: $('uploadBar'),
+    uploadBarFill: $('uploadBarFill'),
+    uploadStatus: $('uploadStatus'),
+    uploadHint: $('uploadHint'),
   };
 
   // ── 狀態 ───────────────────────────────────────────────────────────────
   const state = {
     tracks: [],
+    online: false,    // 有沒有後端（直接開 index.html 的話就沒有）
     current: -1,
     lines: [],        // 解析後的歌詞行
     nodes: [],        // 對應的 DOM
@@ -761,14 +770,34 @@
   const drawerOpen = () => els.drawer.classList.contains('is-open');
 
   // ==========================================================================
-  // 拖放本機檔案
+  // 收檔案：拖進來的、選進來的、zip 解出來的
   // ==========================================================================
+
+  const RE_AUDIO = /\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)$/i;
+  const RE_LYRIC = /\.(lrc|txt)$/i;
+  const RE_IMAGE = /\.(jpe?g|png|webp)$/i;
+  const RE_ZIP = /\.zip$/i;
+
+  const MIME = {
+    mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg',
+    oga: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac',
+    lrc: 'text/plain', txt: 'text/plain',
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
+  };
+
+  const guessType = (name) => MIME[(name.split('.').pop() || '').toLowerCase()] || '';
+
+  function localUrl(file) {
+    const url = URL.createObjectURL(file);
+    state.objectUrls.push(url);
+    return url;
+  }
 
   function setupDropzone() {
     let depth = 0;
 
     window.addEventListener('dragenter', (e) => {
-      if (![...e.dataTransfer.types].includes('Files')) return;
+      if (LyrisMaker.isOpen() || ![...e.dataTransfer.types].includes('Files')) return;
       depth += 1;
       els.dropzone.hidden = false;
     });
@@ -784,33 +813,74 @@
       e.preventDefault();
       depth = 0;
       els.dropzone.hidden = true;
-      await addLocalFiles([...(e.dataTransfer?.files || [])]);
+      if (LyrisMaker.isOpen()) return;
+      await acceptFiles([...(e.dataTransfer?.files || [])]);
     });
+  }
+
+  /** zip：有 server 就上傳進曲庫，沒有 server 就在瀏覽器裡解開當本機檔案 */
+  async function acceptFiles(files) {
+    if (!files.length) return;
+    const zips = files.filter((f) => RE_ZIP.test(f.name));
+    const loose = files.filter((f) => !RE_ZIP.test(f.name));
+
+    if (zips.length && state.online) {
+      for (const zip of zips) await uploadZip(zip);
+    } else if (zips.length) {
+      loose.push(...(await unpackLocally(zips)));
+    }
+    if (loose.length) await addLocalFiles(loose);
+  }
+
+  async function unpackLocally(zips) {
+    const out = [];
+    for (const zip of zips) {
+      try {
+        const entries = await LyrisUnzip.unzip(zip);
+        if (!entries.length) {
+          toast(`${zip.name} 裡沒有 mp3 / lrc / 圖片`);
+          continue;
+        }
+        for (const entry of entries) {
+          out.push(new File([entry.data], entry.base, { type: guessType(entry.base) }));
+        }
+      } catch (err) {
+        toast(err.message || '這個 zip 讀不開');
+      }
+    }
+    return out;
   }
 
   async function addLocalFiles(files) {
     const audios = new Map();
     const lyrics = new Map();
+    const images = new Map();
 
     for (const file of files) {
       const stem = file.name.replace(/\.[^.]+$/, '').toLowerCase();
-      if (/\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)$/i.test(file.name)) audios.set(stem, file);
-      else if (/\.lrc$/i.test(file.name)) lyrics.set(stem, file);
+      if (RE_AUDIO.test(file.name)) audios.set(stem, file);
+      else if (RE_LYRIC.test(file.name)) lyrics.set(stem, file);
+      else if (RE_IMAGE.test(file.name)) images.set(stem, file);
     }
 
     if (!audios.size) {
-      toast(lyrics.size ? '只有歌詞，還缺 mp3 檔' : '請拖入 mp3（可以連同 lrc 一起）');
+      toast(lyrics.size ? '只有歌詞，還缺音檔' : '請拖入 mp3 / zip（可以連同 lrc、封面一起）');
       return;
     }
 
+    // 整包只有一張圖（cover.jpg 那種）而且沒對到任何一首，就當成大家共用的封面
+    const shared =
+      images.size === 1 && ![...images.keys()].some((stem) => audios.has(stem))
+        ? [...images.values()][0]
+        : null;
+
     const added = [];
     for (const [stem, file] of audios) {
-      const url = URL.createObjectURL(file);
-      state.objectUrls.push(url);
       const lrcFile = lyrics.get(stem);
       const lrcText = lrcFile ? await lrcFile.text() : '';
       const meta = lrcText.match(/^\[ti:(.*)]$/im);
       const artistMeta = lrcText.match(/^\[ar:(.*)]$/im);
+      const cover = images.get(stem) || shared;
 
       let title = (meta && meta[1].trim()) || file.name.replace(/\.[^.]+$/, '');
       let artist = (artistMeta && artistMeta[1].trim()) || '';
@@ -825,10 +895,10 @@
         title,
         artist: artist || '本機檔案',
         album: '',
-        audio: url,
+        audio: localUrl(file),
         lyrics: null,
         lrcText,
-        cover: null,
+        cover: cover ? localUrl(cover) : null,
         local: true,
       });
     }
@@ -836,8 +906,146 @@
     const start = state.tracks.length;
     state.tracks.push(...added);
     renderTracklist();
-    toast(`已加入 ${added.length} 首`);
+    // 有 server 的時候要講清楚：這樣只是暫時播，沒有存進曲庫
+    toast(
+      state.online
+        ? `已加入 ${added.length} 首（只在這次瀏覽有效，要存進曲庫請打包成 zip 上傳）`
+        : `已加入 ${added.length} 首`
+    );
     selectTrack(start, true);
+  }
+
+  // ==========================================================================
+  // 上傳 zip 進曲庫
+  // ==========================================================================
+
+  function setupUploader() {
+    els.uploadDrop.addEventListener('click', () => els.uploadInput.click());
+
+    els.uploadInput.addEventListener('change', async () => {
+      const files = [...els.uploadInput.files];
+      els.uploadInput.value = '';       // 選同一個檔案兩次也要能觸發
+      await acceptFiles(files);
+    });
+
+    ['dragenter', 'dragover'].forEach((evt) =>
+      els.uploader.addEventListener(evt, (e) => {
+        e.preventDefault();
+        els.uploader.classList.add('is-over');
+      })
+    );
+    els.uploader.addEventListener('dragleave', () => els.uploader.classList.remove('is-over'));
+
+    els.uploader.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();            // 這裡處理掉，就不用再讓 window 收一次
+      els.uploader.classList.remove('is-over');
+      els.dropzone.hidden = true;
+      await acceptFiles([...(e.dataTransfer?.files || [])]);
+    });
+  }
+
+  function uploadZip(file) {
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/upload');
+      xhr.setRequestHeader('Content-Type', 'application/zip');
+      xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+
+      xhr.upload.addEventListener('progress', (e) => {
+        if (!e.lengthComputable) return;
+        setUploadProgress(e.loaded / e.total);
+        if (e.loaded >= e.total) els.uploadStatus.textContent = '解壓縮中…';
+      });
+
+      xhr.addEventListener('load', async () => {
+        let payload = {};
+        try { payload = JSON.parse(xhr.responseText); } catch { /* 不是 JSON 就算了 */ }
+        if (xhr.status >= 200 && xhr.status < 300) await afterUpload(payload);
+        else endUpload(payload.error || `上傳失敗（${xhr.status}）`, true);
+        resolve();
+      });
+
+      xhr.addEventListener('error', () => {
+        endUpload('連不上 server，上傳失敗', true);
+        resolve();
+      });
+
+      beginUpload(file.name);
+      xhr.send(file);
+    });
+  }
+
+  async function afterUpload(payload) {
+    const before = new Set(state.tracks.map((t) => t.id));
+    const ok = await loadLibrary();
+    renderTracklist();
+    if (!ok) {
+      endUpload('已上傳，但重新讀取曲庫失敗，重新整理看看', true);
+      return;
+    }
+    endUpload(`已收下 ${payload.count} 個檔案 → media/${payload.folder}/`);
+    const fresh = state.tracks.findIndex((t) => !before.has(t.id));
+    if (fresh >= 0) selectTrack(fresh, false);
+  }
+
+  function beginUpload(name) {
+    els.uploader.classList.add('is-busy');
+    els.uploadBar.hidden = false;
+    els.uploadStatus.hidden = false;
+    els.uploadStatus.classList.remove('is-error');
+    els.uploadStatus.textContent = `上傳中：${name}`;
+    setUploadProgress(0);
+  }
+
+  const setUploadProgress = (ratio) => {
+    els.uploadBarFill.style.width = `${Math.round(ratio * 100)}%`;
+  };
+
+  function endUpload(message, isError = false) {
+    els.uploader.classList.remove('is-busy');
+    els.uploadBar.hidden = true;
+    els.uploadStatus.hidden = false;
+    els.uploadStatus.textContent = message;
+    els.uploadStatus.classList.toggle('is-error', isError);
+    toast(message);
+  }
+
+  // ==========================================================================
+  // 製作歌詞
+  // ==========================================================================
+
+  function openMaker() {
+    audio.pause();
+    closeDrawer();
+    LyrisMaker.open();
+  }
+
+  /** 打完軸按「套用到播放器」：直接拿新的歌詞去播，不用先下載再放回 media */
+  function applyMadeLyrics({ lrc, trackId, audioUrl, title, artist, album }) {
+    const index = trackId ? state.tracks.findIndex((t) => t.id === trackId) : -1;
+
+    if (index >= 0) {
+      state.tracks[index] = { ...state.tracks[index], lyrics: null, lrcText: lrc };
+      selectTrack(index, false);
+    } else if (audioUrl) {
+      state.tracks.push({
+        id: `made-${Date.now()}`,
+        title: title || '未命名',
+        artist: artist || '本機檔案',
+        album: album || '',
+        audio: audioUrl,
+        lyrics: null,
+        lrcText: lrc,
+        cover: null,
+        local: true,
+      });
+      renderTracklist();
+      selectTrack(state.tracks.length - 1, false);
+    } else {
+      return;
+    }
+    toast('已套用，播播看對不對');
   }
 
   // ==========================================================================
@@ -911,6 +1119,7 @@
     els.btnNext.addEventListener('click', () => step(1));
 
     els.btnLibrary.addEventListener('click', () => (drawerOpen() ? closeDrawer() : openDrawer()));
+    els.btnMaker.addEventListener('click', openMaker);
     els.btnCloseDrawer.addEventListener('click', closeDrawer);
     els.drawerScrim.addEventListener('click', closeDrawer);
 
@@ -947,6 +1156,7 @@
     audio.addEventListener('seeked', () => { state.activeWord = -1; });
 
     window.addEventListener('keydown', (e) => {
+      if (LyrisMaker.isOpen()) return;   // 打軸的時候空白鍵是「標記」，別讓播放器搶走
       const tag = document.activeElement && document.activeElement.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
@@ -995,22 +1205,44 @@
   // 啟動
   // ==========================================================================
 
-  async function boot() {
-    setupControls();
-    setupScrub();
-    setupDropzone();
-    applyAccents(DEFAULT_ACCENTS);
-    requestAnimationFrame(frame);
-
+  /** 重讀曲庫，順便保住本機拖進來的歌與目前這首（重掃後順序會變） */
+  async function loadLibrary() {
     try {
       const res = await fetch('/api/tracks');
       if (!res.ok) throw new Error(String(res.status));
       const data = await res.json();
-      state.tracks = data.tracks || [];
-    } catch {
-      state.tracks = [];
-    }
 
+      const currentId = state.tracks[state.current] && state.tracks[state.current].id;
+      const locals = state.tracks.filter((t) => t.local);
+      state.tracks = [...(data.tracks || []), ...locals];
+      state.current = currentId ? state.tracks.findIndex((t) => t.id === currentId) : -1;
+      state.online = true;
+      return true;
+    } catch {
+      state.online = false;
+      return false;
+    }
+  }
+
+  async function boot() {
+    setupControls();
+    setupScrub();
+    setupDropzone();
+    setupUploader();
+    LyrisMaker.mount({
+      getTracks: () => state.tracks,
+      toast,
+      onApply: applyMadeLyrics,
+      onClose: () => els.btnMaker.focus(),
+    });
+    applyAccents(DEFAULT_ACCENTS);
+    requestAnimationFrame(frame);
+
+    await loadLibrary();
+    if (!state.online) {
+      // 沒有後端就沒地方存，zip 改成在瀏覽器裡當場解開來播
+      els.uploadHint.textContent = '沒有連到 server，zip 會直接在瀏覽器裡解開播放（不會存檔）';
+    }
     renderTracklist();
     els.lyrics.classList.add('is-empty');
 
@@ -1018,7 +1250,9 @@
       selectTrack(0, false);
     } else {
       els.title.textContent = '曲庫是空的';
-      els.artist.textContent = '把 mp3 / lrc 拖進來，或放進 media 資料夾';
+      els.artist.textContent = state.online
+        ? '上傳一包 zip，或把 mp3 / lrc 放進 media 資料夾'
+        : '把 mp3 / lrc / zip 拖進來就能播';
       openDrawer();
     }
   }

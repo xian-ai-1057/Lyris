@@ -6,11 +6,12 @@
     python3 server.py                # 讀取 ./media，開在 http://127.0.0.1:8000
     python3 server.py --media ~/Music --port 9000 --open
 
-後端只做四件事：
+後端只做五件事：
   1. 掃描資料夾，把同名的 .mp3 / .lrc 配成一首歌
   2. 送出音檔（支援 HTTP Range，這樣拖動進度條才會順）
   3. 送出原始 .lrc 文字（真正的解析在前端做）
   4. 送出封面圖（優先讀 MP3 內嵌的 ID3 APIC，其次找同名圖檔）
+  5. 收 zip 上傳，解開丟進曲庫（只收音檔 / 歌詞 / 圖片）
 """
 
 from __future__ import annotations
@@ -19,21 +20,31 @@ import argparse
 import errno
 import hashlib
 import http.server
+import io
 import json
 import mimetypes
 import os
 import re
+import shutil
 import threading
 import webbrowser
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 AUDIO_EXTS = {".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".wav", ".flac"}
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+LYRIC_EXTS = (".lrc", ".txt")
 FOLDER_COVER_NAMES = ("cover", "folder", "front", "album")
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
+
+# zip 上傳的安全上限（這是個放在自己機器上的小工具，但還是別讓一顆壓縮彈把硬碟塞爆）
+UPLOAD_EXTS = AUDIO_EXTS | set(LYRIC_EXTS) | set(IMAGE_EXTS)
+UPLOAD_MAX_BYTES = 600 * 1024 * 1024
+UPLOAD_MAX_UNPACKED = 2 * 1024 * 1024 * 1024
+UPLOAD_MAX_FILES = 500
 
 
 # --------------------------------------------------------------------------
@@ -241,7 +252,7 @@ class Library:
     def _find_lyrics(audio: Path) -> Path | None:
         """同名的 .lrc 優先；只有 .txt 的話當成沒有時間軸的純文字歌詞。"""
         siblings = [p for p in audio.parent.glob(f"{glob_escape(audio.stem)}.*") if p.is_file()]
-        for ext in (".lrc", ".txt"):
+        for ext in LYRIC_EXTS:
             for sibling in siblings:
                 if sibling.suffix.lower() == ext:
                     return sibling
@@ -266,6 +277,103 @@ def glob_escape(text: str) -> str:
 
 
 # --------------------------------------------------------------------------
+# zip 上傳：解開一包 mp3 / lrc / jpg 丟進曲庫
+# --------------------------------------------------------------------------
+
+_BAD_NAME_CHARS = re.compile(r'[\x00-\x1f<>:"|?*\\/]')
+
+
+def safe_part(part: str) -> str:
+    """把 zip 裡的一段路徑洗成安全的檔名；洗完是空的就給個底線。"""
+    cleaned = _BAD_NAME_CHARS.sub("_", part).strip().strip(".")
+    return cleaned[:120] or "_"
+
+
+def decode_zip_name(info: zipfile.ZipInfo) -> str:
+    """zip 沒標 UTF-8 時，Python 會用 cp437 解，中文檔名就變亂碼；這裡救回來。"""
+    if info.flag_bits & 0x800:
+        return info.filename
+    raw = info.filename.encode("cp437", "replace")
+    for encoding in ("utf-8", "big5", "gbk"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return info.filename
+
+
+def _unique_dir(root: Path, name: str) -> Path:
+    candidate = root / name
+    counter = 2
+    while candidate.exists():
+        candidate = root / f"{name}-{counter}"
+        counter += 1
+    candidate.mkdir(parents=True)
+    return candidate
+
+
+def unpack_archive(raw: bytes, root: Path, hint: str) -> dict:
+    """把 zip 解到 media/<資料夾>/，只留音檔、歌詞與圖片。回傳寫進去的相對路徑。"""
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile as exc:
+        raise ValueError("這不是有效的 zip 檔") from exc
+
+    with archive:
+        members: list[tuple[zipfile.ZipInfo, list[str]]] = []
+        unpacked = 0
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            name = decode_zip_name(info)
+            parts = [p for p in name.replace("\\", "/").split("/") if p not in ("", ".", "..")]
+            # __MACOSX/ 與 ._foo 是 macOS 壓縮時附的資源檔，不是使用者要的東西
+            if not parts or parts[0] == "__MACOSX" or parts[-1].startswith("."):
+                continue
+            if Path(parts[-1]).suffix.lower() not in UPLOAD_EXTS:
+                continue
+            unpacked += info.file_size
+            if unpacked > UPLOAD_MAX_UNPACKED or len(members) >= UPLOAD_MAX_FILES:
+                raise ValueError("這包解開後太大了，拆成幾包再上傳")
+            members.append((info, parts))
+
+        if not members:
+            raise ValueError("zip 裡沒有找到 mp3 / lrc / 圖片")
+
+        # 整包只包在同一個外殼資料夾裡的話就脫掉，免得曲庫多一層
+        tops = {parts[0] for _, parts in members}
+        if len(tops) == 1 and all(len(parts) > 1 for _, parts in members):
+            members = [(info, parts[1:]) for info, parts in members]
+
+        target = _unique_dir(root, safe_part(hint))
+        written: list[str] = []
+        try:
+            for info, parts in members:
+                dest = target.joinpath(*[safe_part(p) for p in parts]).resolve()
+                if not dest.is_relative_to(target.resolve()):  # 擋 zip slip
+                    continue
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(info) as src, dest.open("wb") as out:
+                    shutil.copyfileobj(src, out, 64 * 1024)
+                written.append(dest.relative_to(root).as_posix())
+        except zipfile.BadZipFile as exc:
+            shutil.rmtree(target, ignore_errors=True)
+            raise ValueError("zip 的內容壞掉了，重新壓一次試試") from exc
+        except RuntimeError as exc:   # zipfile 用 RuntimeError 表示「要密碼」
+            shutil.rmtree(target, ignore_errors=True)
+            raise ValueError("這包有密碼，請先解密再上傳") from exc
+        except Exception:
+            shutil.rmtree(target, ignore_errors=True)
+            raise
+
+    if not written:
+        shutil.rmtree(target, ignore_errors=True)
+        raise ValueError("zip 裡沒有找到 mp3 / lrc / 圖片")
+
+    return {"folder": target.name, "files": written, "count": len(written)}
+
+
+# --------------------------------------------------------------------------
 # HTTP
 # --------------------------------------------------------------------------
 
@@ -281,6 +389,56 @@ class LyrisHandler(http.server.BaseHTTPRequestHandler):
 
     def do_HEAD(self) -> None:  # noqa: N802
         self._handle(send_body=False)
+
+    def do_POST(self) -> None:  # noqa: N802
+        path = unquote(urlparse(self.path).path)
+        try:
+            if path == "/api/upload":
+                self._handle_upload()
+            else:
+                self._send_error(404, "not found")
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _handle_upload(self) -> None:
+        try:
+            raw = self._read_body()
+        except ValueError as exc:
+            self._send_error(413, str(exc))
+            return
+
+        hint = Path(unquote(self.headers.get("X-Filename", ""))).stem or "upload"
+        try:
+            result = unpack_archive(raw, self.library.root, hint)
+        except ValueError as exc:
+            self._send_error(400, str(exc))
+            return
+        except OSError as exc:
+            self._send_error(500, f"寫入曲庫失敗：{exc}")
+            return
+
+        self.library.scan()
+        self._send_json(result, send_body=True)
+
+    def _read_body(self) -> bytes:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length <= 0:
+            raise ValueError("沒有收到檔案")
+        if length > UPLOAD_MAX_BYTES:
+            raise ValueError(f"檔案太大了（上限 {UPLOAD_MAX_BYTES // (1024 * 1024)} MB）")
+
+        chunks: list[bytes] = []
+        remaining = length
+        while remaining > 0:
+            chunk = self.rfile.read(min(1 << 20, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
 
     def _handle(self, send_body: bool) -> None:
         path = unquote(urlparse(self.path).path)
@@ -439,6 +597,7 @@ def main() -> None:
     print(f"♪ Lyris  {url}")
     print(f"  曲庫：{media}（找到 {count} 首）")
     print("  把 song.mp3 和 song.lrc（同檔名）丟進去就會自動出現，重新整理即可。")
+    print("  也可以在網頁上直接上傳打包好的 zip，或用「製作歌詞」打一份新的 lrc。")
     print("  Ctrl+C 結束")
 
     if args.open:
