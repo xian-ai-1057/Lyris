@@ -263,7 +263,18 @@ body.is-playing .cover::before { opacity: 0.62; }
 
 .cover__inner img.is-loaded { opacity: 1; }
 
-.cover__placeholder { color: rgba(255, 255, 255, 0.24); }
+/* 沒有封面時，用抽出來的兩個主色鋪一張漸層唱片套，比空盒子好看 */
+.cover.is-blank .cover__inner {
+  background:
+    radial-gradient(120% 100% at 22% 18%, rgba(255, 255, 255, 0.26), transparent 58%),
+    linear-gradient(148deg,
+      color-mix(in oklab, var(--accent) 68%, #0a0a12),
+      color-mix(in oklab, var(--accent-2) 58%, #0a0a12));
+  transition: background 1.2s var(--ease-soft);
+}
+
+.cover__placeholder { color: rgba(255, 255, 255, 0.28); }
+.cover.is-blank .cover__placeholder { color: rgba(255, 255, 255, 0.5); }
 
 .cover__shine {
   position: absolute;
@@ -491,6 +502,18 @@ body.is-playing .ctrl--play .ico-pause { display: block; }
 
 /* 太遠的行不必再算模糊，省效能 */
 .line.is-far { filter: none; color: rgba(245, 246, 251, 0.11); transition-delay: 0ms; }
+
+/* 純文字歌詞（沒有時間軸）：整份平鋪，不做距離淡出也不能點 */
+.lyrics__track.is-static { padding-top: 7vh; padding-bottom: 14vh; }
+
+.line.is-static {
+  color: rgba(245, 246, 251, 0.68);
+  filter: none;
+  transform: none;
+  cursor: default;
+}
+
+.line.is-static:hover { color: rgba(245, 246, 251, 0.68); }
 
 .line:hover { color: rgba(245, 246, 251, 0.72); }
 

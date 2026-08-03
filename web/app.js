@@ -309,9 +309,16 @@
     els.viewport.scrollTop = 0;
     state.scrollTarget = 0;
 
-    if (parsed && parsed.synced === false) {
-      // 沒有時間軸就靜靜地列出來，不做同步
-      state.nodes.forEach((n) => n.classList.remove('is-far'));
+    if (!state.synced) {
+      // 沒有時間軸就靜靜地列出來：不做同步，也不要套距離模糊（--d 預設是 6）
+      els.track.classList.add('is-static');
+      state.nodes.forEach((node) => {
+        node.classList.remove('is-far');
+        node.classList.add('is-static');
+        node.style.setProperty('--d', '0');
+      });
+    } else {
+      els.track.classList.remove('is-static');
     }
   }
 
@@ -476,6 +483,7 @@
   els.resumePill.addEventListener('click', resumeAuto);
 
   els.track.addEventListener('click', (e) => {
+    if (!state.synced) return;          // 沒有時間軸，點了也無處可跳
     const node = e.target.closest('.line');
     if (!node) return;
     const line = state.lines[Number(node.dataset.i)];
@@ -544,6 +552,7 @@
       els.coverImg.hidden = true;
       els.coverImg.classList.remove('is-loaded');
       els.coverFallback.hidden = false;
+      els.cover.classList.add('is-blank');
       els.ambientArt.classList.remove('is-visible');
       applyAccents(accentsFromString(track.title + track.artist));
       return;
@@ -554,6 +563,7 @@
       els.coverImg.src = img.src;
       els.coverImg.hidden = false;
       els.coverFallback.hidden = true;
+      els.cover.classList.remove('is-blank');
       requestAnimationFrame(() => els.coverImg.classList.add('is-loaded'));
       els.ambientArt.style.backgroundImage = `url("${img.src}")`;
       els.ambientArt.classList.add('is-visible');
@@ -562,6 +572,7 @@
     img.onerror = () => {
       els.coverImg.hidden = true;
       els.coverFallback.hidden = false;
+      els.cover.classList.add('is-blank');
       els.ambientArt.classList.remove('is-visible');
       applyAccents(accentsFromString(track.title));
     };

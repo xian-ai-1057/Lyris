@@ -239,13 +239,12 @@ class Library:
 
     @staticmethod
     def _find_lyrics(audio: Path) -> Path | None:
-        for candidate in (audio.with_suffix(".lrc"), audio.with_suffix(".LRC")):
-            if candidate.is_file():
-                return candidate
-        # 大小寫混雜的檔名（例如 song.Lrc）也接住
-        for sibling in audio.parent.glob(f"{glob_escape(audio.stem)}.*"):
-            if sibling.suffix.lower() == ".lrc":
-                return sibling
+        """同名的 .lrc 優先；只有 .txt 的話當成沒有時間軸的純文字歌詞。"""
+        siblings = [p for p in audio.parent.glob(f"{glob_escape(audio.stem)}.*") if p.is_file()]
+        for ext in (".lrc", ".txt"):
+            for sibling in siblings:
+                if sibling.suffix.lower() == ext:
+                    return sibling
         return None
 
     @staticmethod
