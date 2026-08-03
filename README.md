@@ -160,9 +160,33 @@ media/
 
 時間軸亂序、超過一小時、`CRLF`、有 BOM 都沒問題。
 
+## 放到網路上給別人用（Vercel）
+
+前端本來就能離線跑，所以把 `web/` 當成純靜態網站丟上去就好，不用後端。
+別人打開網址、把自己的 mp3 / lrc / zip 拖進去就能播，打軸器也一樣能用。
+
+1. 到 <https://vercel.com> 用 GitHub 帳號登入
+2. **Add New… → Project**，選這個 repo，按 **Import**
+3. 設定畫面什麼都不用改，直接 **Deploy**（根目錄的 `vercel.json` 已經指定好 `web/`）
+4. 一分鐘後拿到 `https://<專案名>.vercel.app`
+
+之後每次 push 到 `main`，Vercel 會自動重新部署。
+
+Vercel 那份是**純前端**：
+
+- 沒有 `/api/tracks`，所以不會有預載曲庫，開起來就是空的等你拖檔案
+- zip 會用瀏覽器內建的 `DecompressionStream` 當場解開，不會存檔，重新整理就沒了
+- 每個人的歌都留在自己的瀏覽器裡，不會上傳到任何地方
+
+`server.py` **不會**跟著部署，也不建議這樣做：Vercel 跑的是無狀態的
+serverless function，沒有可以長期存檔的磁碟，`media/` 又本來就被 `.gitignore`
+排除。要有共用曲庫的話，得自己找一台常駐的機器跑 `python3 server.py --host 0.0.0.0`，
+並且注意上面那段安全提醒跟你手上音樂的授權。
+
 ## 專案結構
 
 ```
+vercel.json        # 部署設定：靜態網站，根目錄指到 web/
 server.py          # 掃曲庫 / 送音檔（支援 Range）/ 送 lrc / 挖 ID3 封面 / 收 zip
 web/
 ├── index.html
