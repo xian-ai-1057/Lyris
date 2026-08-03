@@ -1,5 +1,7 @@
-# 你的音樂與歌詞不要進版控
 !media/README.md
+
+# build.mjs 的產物，部署時由 Vercel 自己建
+dist/
 
 __pycache__/
 *.py[cod]
