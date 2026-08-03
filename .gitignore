@@ -1,5 +1,4 @@
 # 你的音樂與歌詞不要進版控
-media/*
 !media/README.md
 
 __pycache__/
