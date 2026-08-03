@@ -28,6 +28,10 @@
       <span class="brand__name">Lyris</span>
     </div>
     <div class="topbar__actions">
+      <button class="icon-btn" id="btnMaker" aria-label="製作歌詞" title="製作歌詞（打時間軸）">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 21v-3.4L14.6 6l3.4 3.4L6.4 21H3z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.4 7.2 16.8 3.8 20.2 7.2 16.8 10.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        <span class="icon-btn__label">製作歌詞</span>
+      </button>
       <button class="icon-btn" id="btnLibrary" aria-label="曲目清單" title="曲目清單（L）">
         <svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 6h11M4 12h11M4 18h7M19 5v9.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="17.4" cy="16" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
         <span class="icon-btn__label">曲目</span>
@@ -114,7 +118,18 @@
     </button>
   </div>
   <ol class="tracklist" id="tracklist"></ol>
-  <p class="drawer__hint">支援拖曳：把 mp3 / lrc 直接拉進視窗即可播放。</p>
+
+  <!-- 上傳區：一包 zip 直接進曲庫 -->
+  <div class="uploader" id="uploader">
+    <input type="file" id="uploadInput" accept=".zip,application/zip,application/x-zip-compressed" multiple hidden>
+    <button class="uploader__drop" id="uploadDrop" type="button">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 15v3.5A1.5 1.5 0 005.5 20h13a1.5 1.5 0 001.5-1.5V15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="uploader__title">上傳 ZIP</span>
+      <span class="uploader__hint" id="uploadHint">把打包好的 mp3 / lrc / jpg 拖進來，或點一下選擇</span>
+    </button>
+    <div class="uploader__bar" id="uploadBar" hidden><i id="uploadBarFill"></i></div>
+    <p class="uploader__status" id="uploadStatus" hidden></p>
+  </div>
 </aside>
 
 <!-- 拖放提示 -->
@@ -122,13 +137,106 @@
   <div class="dropzone__card">
     <svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 15v3.5A1.5 1.5 0 005.5 20h13a1.5 1.5 0 001.5-1.5V15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <p>放開就開始播放</p>
-    <span>接受 .mp3 與 .lrc（同檔名會自動配對）</span>
+    <span>接受 .zip 整包，或 .mp3 / .lrc / 封面圖（同檔名會自動配對）</span>
   </div>
 </div>
+
+<!-- 歌詞打軸器 -->
+<section class="maker" id="maker" hidden aria-label="製作歌詞">
+  <header class="maker__head">
+    <div class="maker__head-title">
+      <h2>製作歌詞</h2>
+      <span class="maker__step" id="makerStep">1 / 2 · 準備素材</span>
+    </div>
+    <button class="icon-btn icon-btn--round" id="makerClose" aria-label="關閉製作歌詞">
+      <svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+  </header>
+
+  <!-- 第一步：挑音檔、貼歌詞 -->
+  <div class="maker__setup" id="makerSetup">
+    <div class="field">
+      <span class="field__label">音檔</span>
+      <div class="field__row">
+        <select id="makerSource" aria-label="從曲庫挑一首"></select>
+        <button class="btn btn--ghost" id="makerPick" type="button">選擇本機檔案</button>
+        <input type="file" id="makerFile" accept="audio/*,.mp3,.m4a,.aac,.ogg,.oga,.opus,.wav,.flac" hidden>
+      </div>
+      <p class="field__hint" id="makerSourceName">尚未選擇音檔</p>
+    </div>
+
+    <div class="field field--grid">
+      <label>歌名<input id="makerTitle" type="text" placeholder="選填"></label>
+      <label>歌手<input id="makerArtist" type="text" placeholder="選填"></label>
+      <label>專輯<input id="makerAlbum" type="text" placeholder="選填"></label>
+    </div>
+
+    <div class="field field--grow">
+      <label class="field__label" for="makerText">歌詞（一行一句）</label>
+      <textarea id="makerText" placeholder="把歌詞貼上來，一行一句…"></textarea>
+      <p class="field__hint">空白行會變成間奏。已經有時間軸的 lrc 也可以直接貼，舊的時間軸會自動拔掉。</p>
+    </div>
+
+    <div class="maker__actions">
+      <button class="btn btn--primary" id="makerStart" type="button">開始打軸</button>
+    </div>
+  </div>
+
+  <!-- 第二步：邊聽邊按空白鍵 -->
+  <div class="maker__work" id="makerWork" hidden>
+    <div class="maker__bar">
+      <button class="mbtn mbtn--play" id="makerPlay" type="button" aria-label="播放／暫停">
+        <svg class="ico-play" viewBox="0 0 24 24" width="18" height="18"><path d="M8 5.5l11 6.5-11 6.5z" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        <svg class="ico-pause" viewBox="0 0 24 24" width="18" height="18"><path d="M9 5.5v13M15 5.5v13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+      </button>
+      <button class="mbtn" id="makerBack" type="button" title="倒退 3 秒">−3s</button>
+      <button class="mbtn" id="makerFwd" type="button" title="快轉 3 秒">+3s</button>
+      <button class="mbtn mbtn--mark" id="makerMark" type="button" title="標記這一句（等同空白鍵）">標記這句</button>
+
+      <div class="maker__seek" id="makerSeek" role="slider" aria-label="播放進度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="maker__seek-rail"><div class="maker__seek-fill" id="makerSeekFill"></div></div>
+      </div>
+      <span class="maker__time" id="makerTime">0:00 / 0:00</span>
+
+      <label class="maker__num">速度
+        <select id="makerRate">
+          <option value="0.5">0.5×</option>
+          <option value="0.75">0.75×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.25">1.25×</option>
+        </select>
+      </label>
+      <label class="maker__num" title="按鍵總是慢半拍的話，填個負數整體往前挪">微調
+        <input id="makerOffset" type="number" value="0" step="50"><span class="maker__unit">ms</span>
+      </label>
+    </div>
+
+    <p class="maker__keys">
+      <kbd>空白鍵</kbd> 標記這句並前進 · <kbd>Backspace</kbd> 退回一句 ·
+      <kbd>Enter</kbd> 播放／暫停 · <kbd>←</kbd><kbd>→</kbd> 前後 3 秒
+    </p>
+
+    <ol class="mlines" id="makerLines"></ol>
+
+    <div class="maker__foot">
+      <span class="maker__stat" id="makerStat">已標記 0 / 0</span>
+      <div class="maker__foot-actions">
+        <button class="btn btn--ghost" id="makerEdit" type="button">回去改歌詞</button>
+        <button class="btn btn--ghost" id="makerReset" type="button">清除時間軸</button>
+        <button class="btn btn--ghost" id="makerApply" type="button">套用到播放器</button>
+        <button class="btn btn--primary" id="makerDownload" type="button">下載 .lrc</button>
+      </div>
+    </div>
+  </div>
+
+  <audio id="makerAudio" preload="metadata"></audio>
+</section>
 
 <div class="toast" id="toast" hidden></div>
 
 <audio id="audio" preload="metadata"></audio>
+<script src="unzip.js"></script>
+<script src="maker.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

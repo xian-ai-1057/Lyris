@@ -805,6 +805,67 @@ body:not(.is-playing) .eq i { animation-play-state: paused; }
   color: var(--faint);
 }
 
+/* ── 上傳區 ───────────────────────────────────────────────────────────── */
+
+.uploader {
+  padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--hair-soft);
+}
+
+.uploader__drop {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 16px 14px;
+  border: 1.5px dashed var(--hair);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
+}
+
+.uploader__drop:hover,
+.uploader.is-over .uploader__drop {
+  color: var(--fg);
+  border-color: color-mix(in oklab, var(--accent) 62%, transparent);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+}
+
+.uploader.is-busy .uploader__drop { opacity: 0.45; pointer-events: none; }
+
+.uploader__title { font-size: 0.86rem; font-weight: 600; color: var(--fg); }
+.uploader__hint { font-size: 0.72rem; line-height: 1.6; color: var(--faint); }
+
+.uploader__bar {
+  height: 4px;
+  margin-top: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.uploader__bar i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.2s var(--ease);
+}
+
+.uploader__status {
+  margin: 8px 2px 0;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.uploader__status.is-error { color: #ff9a9a; }
+
 .tracklist__empty {
   padding: 26px 14px;
   color: var(--muted);
@@ -820,6 +881,7 @@ body:not(.is-playing) .eq i { animation-play-state: paused; }
   z-index: 20;
   display: grid;
   place-items: center;
+  pointer-events: none;   /* 只是提示，讓下面的上傳區也收得到 drop */
   background: rgba(5, 5, 10, 0.72);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
@@ -862,6 +924,361 @@ body:not(.is-playing) .eq i { animation-play-state: paused; }
 .toast.is-shown { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── 通用元件（製作歌詞用）────────────────────────────────────────────── */
+
+.btn {
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--hair);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s, border-color 0.2s, transform 0.16s var(--ease);
+}
+
+.btn:hover { color: var(--fg); background: rgba(255, 255, 255, 0.1); }
+.btn:active { transform: scale(0.96); }
+
+.btn--primary {
+  border-color: transparent;
+  background: linear-gradient(120deg, var(--accent), var(--accent-2));
+  color: #0b0b12;
+  font-weight: 650;
+}
+
+.btn--primary:hover { background: linear-gradient(120deg, var(--accent), var(--accent-2)); filter: brightness(1.1); color: #0b0b12; }
+
+.field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.field__label { font-size: 0.78rem; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
+.field__row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.field__hint { margin: 0; font-size: 0.74rem; line-height: 1.65; color: var(--faint); }
+.field__hint.is-set { color: var(--accent); }
+
+.field--grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.field--grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+input[type="text"],
+input[type="number"],
+select,
+textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hair);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 450;
+}
+
+textarea {
+  min-height: 32vh;
+  resize: vertical;
+  line-height: 1.75;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.btn:focus-visible,
+.uploader__drop:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+select { cursor: pointer; max-width: 100%; }
+select option { background: #14141c; color: var(--fg); }
+
+/* ── 製作歌詞 ─────────────────────────────────────────────────────────── */
+
+.maker {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: rgba(8, 8, 14, 0.9);
+  backdrop-filter: blur(34px) saturate(150%);
+  -webkit-backdrop-filter: blur(34px) saturate(150%);
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.26s, transform 0.3s var(--ease);
+}
+
+.maker.is-open { opacity: 1; transform: none; }
+
+.maker__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px var(--gutter);
+  padding-top: calc(16px + env(safe-area-inset-top));
+  border-bottom: 1px solid var(--hair-soft);
+}
+
+.maker__head-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.maker__head h2 { margin: 0; font-size: 1.05rem; font-weight: 650; }
+.maker__step { font-size: 0.76rem; color: var(--faint); letter-spacing: 0.04em; }
+
+.maker__setup {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: min(780px, 100%);
+  margin: 0 auto;
+  padding: 22px var(--gutter) 30px;
+}
+
+.maker__actions { display: flex; justify-content: flex-end; }
+
+.maker__work {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  width: min(920px, 100%);
+  margin: 0 auto;
+  padding: 14px var(--gutter) 0;
+}
+
+.maker__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--hair);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.mbtn {
+  display: grid;
+  place-items: center;
+  min-width: 40px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--hair);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: color 0.18s, background 0.18s, transform 0.16s var(--ease);
+}
+
+.mbtn:hover { color: var(--fg); background: rgba(255, 255, 255, 0.1); }
+.mbtn:active { transform: scale(0.94); }
+
+.mbtn--play {
+  width: 38px; height: 38px;
+  padding: 0;
+  border-color: transparent;
+  background: var(--fg);
+  color: #0b0b12;
+}
+
+.mbtn--play:hover { background: #fff; color: #0b0b12; }
+
+.mbtn--mark {
+  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.mbtn--mark:hover { background: color-mix(in oklab, var(--accent) 32%, transparent); }
+.mbtn--play .ico-pause { display: none; }
+.maker.is-playing .mbtn--play .ico-play { display: none; }
+.maker.is-playing .mbtn--play .ico-pause { display: block; }
+
+.maker__seek { flex: 1; min-width: 120px; padding: 8px 0; cursor: pointer; touch-action: none; }
+
+.maker__seek-rail {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+
+.maker__seek-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+
+.maker__time {
+  font-size: 0.76rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.maker__num {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.maker__num select,
+.maker__num input {
+  width: auto;
+  padding: 5px 8px;
+  font-size: 0.76rem;
+}
+
+.maker__num input { width: 68px; text-align: right; font-variant-numeric: tabular-nums; }
+.maker__unit { margin-left: -2px; }
+
+.maker__keys {
+  margin: 10px 2px;
+  font-size: 0.74rem;
+  line-height: 1.9;
+  color: var(--faint);
+}
+
+kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 7px;
+  margin: 0 1px;
+  border-radius: 6px;
+  border: 1px solid var(--hair);
+  border-bottom-width: 2px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+/* 歌詞行 */
+
+.mlines {
+  position: relative;   /* setCursor 用 offsetTop 捲動，基準要是這個容器 */
+  margin: 0;
+  padding: 2px 0 40vh;
+  list-style: none;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+.mlines::-webkit-scrollbar { width: 8px; }
+.mlines::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.mline {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: rgba(245, 246, 251, 0.42);
+  transition: background 0.18s, color 0.18s, border-color 0.18s;
+}
+
+.mline:hover { background: rgba(255, 255, 255, 0.05); }
+.mline.is-set { color: rgba(245, 246, 251, 0.78); }
+
+.mline.is-current {
+  color: var(--fg);
+  border-color: color-mix(in oklab, var(--accent) 52%, transparent);
+  background: color-mix(in oklab, var(--accent) 13%, transparent);
+}
+
+.mline.is-hit { animation: hit 0.5s var(--ease-soft); }
+
+@keyframes hit {
+  from { background: color-mix(in oklab, var(--accent) 45%, transparent); }
+}
+
+.mline__time {
+  padding: 3px 0;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--faint);
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: color 0.18s, background 0.18s;
+}
+
+.mline.is-set .mline__time { color: var(--accent); background: color-mix(in oklab, var(--accent) 16%, transparent); }
+.mline__time:hover { background: rgba(255, 255, 255, 0.14); }
+
+.mline__text {
+  font-size: 0.95rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.mline__text.is-gap { color: var(--faint); font-style: italic; }
+
+.mline__tools { display: flex; gap: 4px; opacity: 0; transition: opacity 0.18s; }
+.mline:hover .mline__tools,
+.mline.is-current .mline__tools { opacity: 1; }
+
+.mline__tools button {
+  width: 26px; height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.mline__tools button:hover { color: var(--fg); background: rgba(255, 255, 255, 0.18); }
+
+.maker__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 0 calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--hair-soft);
+}
+
+.maker__stat { font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.maker__stat.is-done { color: var(--accent); }
+.maker__foot-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ── 響應式 ───────────────────────────────────────────────────────────── */
 
@@ -907,6 +1324,21 @@ body:not(.is-playing) .eq i { animation-play-state: paused; }
   .icon-btn__label { display: none; }
   .icon-btn { padding: 9px; }
   .drawer { top: auto; height: 74dvh; right: 8px; left: 8px; bottom: 8px; width: auto; transform: translateY(calc(100% + 16px)); }
+
+  .maker__seek { order: 10; flex-basis: 100%; }
+  .maker__keys { display: none; }   /* 手機沒有鍵盤，改用「標記這句」按鈕 */
+  /* 手機沒有 hover，工具列改成只在「正在打的那一句」展開，其餘收起來不佔高度 */
+  .mline { grid-template-columns: 64px minmax(0, 1fr); }
+  .mline__tools {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+    height: 0;
+    overflow: hidden;
+    opacity: 0;
+  }
+  .mline.is-current .mline__tools { height: auto; opacity: 1; margin-top: 6px; }
+  .maker__foot-actions { width: 100%; }
+  .maker__foot-actions .btn { flex: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
